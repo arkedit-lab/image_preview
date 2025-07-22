@@ -1,0 +1,2130 @@
+    <script>
+        // TIFF処理用の軽量ライブラリを動的読み込み
+        let tiffLibraryLoaded = false;
+        let tiffLibraryLoading = false;
+
+        // TIFFライブラリを動的に読み込む関数
+        function loadTiffLibrary() {
+            return new Promise((resolve, reject) => {
+                if (tiffLibraryLoaded) {
+                    resolve();
+                    return;
+                }
+
+                if (tiffLibraryLoading) {
+                    // 既に読み込み中の場合は待機
+                    const checkInterval = setInterval(() => {
+                        if (tiffLibraryLoaded) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
+                    return;
+                }
+
+                tiffLibraryLoading = true;
+
+                // utif.js（より軽量で確実なTIFFライブラリ）を使用
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js';
+                
+                script.onload = function() {
+                    console.log('UTIF.js（TIFFライブラリ）読み込み完了');
+                    tiffLibraryLoaded = true;
+                    tiffLibraryLoading = false;
+                    resolve();
+                };
+                
+                script.onerror = function() {
+                    console.error('TIFFライブラリの読み込みに失敗しました');
+                    tiffLibraryLoading = false;
+                    reject(new Error('TIFF library load failed'));
+                };
+                
+                document.head.appendChild(script);
+            });
+        }
+
+        // ページ読み込み時にTIFFライブラリを事前読み込み
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTiffLibrary().catch(console.error);
+        });
+    </script><!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+    <title>画像一括プレビュー＆印刷ツール</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+:root {
+  --primary-color: #3b82f6;
+  --primary-hover: #2563eb;
+  --secondary-color: #10b981;
+  --accent-color: #f59e0b;
+  --text-color: #1f2937;
+  --bg-color: #f8fafc;
+  --card-bg: #ffffff;
+  --border-color: #e5e7eb;
+  --border-radius: 8px;
+  --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --transition: all 0.3s ease;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Noto Sans JP', sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  color: var(--text-color);
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* ヘッダー */
+.header {
+  text-align: center;
+  margin-bottom: 30px;
+  color: white;
+}
+
+.header h1 {
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.header p {
+  font-size: 1.1rem;
+  opacity: 0.9;
+}
+
+/* コントロールパネル */
+.control-panel {
+  background: var(--card-bg);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--box-shadow);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 20px;
+  align-items: center;
+}
+
+.upload-area {
+  position: relative;
+  border: 2px dashed var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  text-align: center;
+  transition: var(--transition);
+  cursor: pointer;
+  background: #f8fafc;
+}
+
+.upload-area:hover,
+.upload-area.drag-over {
+  border-color: var(--primary-color);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.file-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.upload-prompt i {
+  font-size: 2rem;
+  color: var(--primary-color);
+}
+
+/* 統計情報 */
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.stat-number {
+  font-weight: 700;
+  color: var(--primary-color);
+}
+
+/* フィルター */
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-group label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  min-width: 70px;
+}
+
+.filter-group select,
+.filter-group input {
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+/* ボタン */
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-primary {
+  background: var(--primary-color);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: var(--secondary-color);
+  color: white;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: white;
+}
+
+/* プレビューグリッド */
+.preview-container {
+  background: var(--card-bg);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  box-shadow: var(--box-shadow);
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.preview-title {
+  font-size: 1.3rem;
+  color: var(--text-color);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.page-info {
+  font-size: 0.9rem;
+  color: #6b7280;
+}
+
+.btn-page {
+  padding: 5px 10px;
+  font-size: 0.8rem;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.image-item {
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px;
+  text-align: center;
+  transition: var(--transition);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.image-item:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.image-preview {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  background: #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.image-info {
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.image-name {
+  font-weight: 500;
+  margin-bottom: 2px;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.image-meta {
+  color: #6b7280;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.file-size {
+  font-weight: 500;
+}
+
+.image-dimensions {
+  font-size: 0.65rem;
+}
+
+/* 選択状態 */
+.image-item.selected {
+  border-color: var(--primary-color);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.image-item .selection-overlay {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  background: var(--primary-color);
+  color: white;
+  border-radius: 50%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+}
+
+.image-item.selected .selection-overlay {
+  display: flex;
+}
+
+/* 空の状態 */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #6b7280;
+}
+
+.empty-state i {
+  font-size: 4rem;
+  margin-bottom: 20px;
+  opacity: 0.5;
+}
+
+/* ローディング */
+.loading {
+  text-align: center;
+  padding: 40px;
+}
+
+.spinner {
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  border-radius: 50%;
+  border-top: 4px solid var(--primary-color);
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 20px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 印刷スタイル */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  .header,
+  .control-panel,
+  .preview-header {
+    display: none !important;
+  }
+  
+  .container {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  
+  .preview-container {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+  
+  .preview-grid {
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 8px !important;
+    page-break-inside: avoid;
+  }
+  
+  .image-item {
+    border: 1px solid #ccc !important;
+    background: white !important;
+    box-shadow: none !important;
+    transform: none !important;
+    page-break-inside: avoid;
+    margin-bottom: 4px;
+  }
+  
+  .image-preview {
+    height: 120px !important;
+  }
+  
+  .image-info {
+    font-size: 8px !important;
+  }
+  
+  .image-name {
+    font-size: 9px !important;
+  }
+  
+  .page-break {
+    page-break-before: always !important;
+  }
+}
+
+/* レスポンシブデザイン */
+@media (max-width: 1200px) {
+  .preview-grid {
+    grid-template-columns: repeat(8, 1fr);
+  }
+}
+
+@media (max-width: 968px) {
+  .control-panel {
+    grid-template-columns: 1fr;
+  }
+  
+  .preview-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 15px;
+  }
+  
+  .header h1 {
+    font-size: 2rem;
+  }
+  
+  .preview-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  
+  .image-preview {
+    height: 60px;
+  }
+  
+  .page-controls {
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.rename-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.rename-modal.show {
+  display: flex;
+}
+
+.rename-modal-content {
+  background: white;
+  border-radius: var(--border-radius);
+  padding: 30px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.modal-close {
+  position: absolute;
+  top: 15px;
+  right: 20px;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6b7280;
+  transition: var(--transition);
+}
+
+.modal-close:hover {
+  color: var(--text-color);
+}
+
+.rename-title {
+  font-size: 1.5rem;
+  color: var(--primary-color);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rename-options {
+  display: grid;
+  gap: 20px;
+  margin-bottom: 25px;
+}
+
+.rename-option {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 15px;
+  background: #f8fafc;
+}
+
+.option-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.option-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary-color);
+}
+
+.option-label {
+  font-weight: 500;
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+.option-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.option-input {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.option-input:focus {
+  border-color: var(--primary-color);
+  outline: none;
+}
+
+.option-single {
+  grid-column: 1 / -1;
+}
+
+.preview-section {
+  margin: 25px 0;
+  padding: 15px;
+  background: #f0f9ff;
+  border-radius: 6px;
+  border: 1px solid #bae6fd;
+}
+
+.preview-title {
+  font-weight: 500;
+  color: var(--primary-color);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-list {
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.preview-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid #e0f2fe;
+}
+
+.preview-item:last-child {
+  border-bottom: none;
+}
+
+.preview-original {
+  color: #6b7280;
+}
+
+.preview-new {
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+.rename-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 25px;
+}
+
+.btn-rename {
+  background: var(--primary-color);
+  color: white;
+}
+
+.btn-rename:hover {
+  background: var(--primary-hover);
+}
+
+.btn-zip {
+  background: var(--secondary-color);
+  color: white;
+}
+
+.btn-zip:hover {
+  background: #059669;
+}
+
+.rename-stats {
+  font-size: 0.9rem;
+  color: #6b7280;
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+/* レスポンシブ */
+@media (max-width: 768px) {
+  .rename-modal-content {
+    padding: 20px;
+    margin: 10px;
+  }
+  
+  .option-inputs {
+    grid-template-columns: 1fr;
+  }
+  
+  .rename-actions {
+    flex-direction: column;
+  }
+}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-images"></i> 画像一括プレビュー＆印刷ツール</h1>
+            <p>大量の画像を一覧表示して印刷できるツール</br>※一度に100枚までの表示が可能</p>
+        </div>
+
+        <!-- コントロールパネル -->
+        <div class="control-panel">
+            <!-- アップロードエリア -->
+            <div class="upload-area" id="uploadArea">
+                <input type="file" id="fileInput" multiple accept="image/*,.tiff,.tif" class="file-input">
+                <div class="upload-prompt">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <div>画像をドラッグ&ドロップ</div>
+                    <div style="font-size: 0.8rem;">またはクリックして選択</div>
+                    <div style="font-size: 0.75rem; color: #6b7280; margin-top: 5px;">
+                        対応形式: JPEG, PNG, GIF, WebP, BMP, TIFF
+                    </div>
+                </div>
+            </div>
+
+            <!-- 統計情報 -->
+            <div class="stats">
+                <div class="stat-item">
+                    <i class="fas fa-images"></i>
+                    <span>総画像数: <span class="stat-number" id="totalImages">0</span></span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-filter"></i>
+                    <span>表示中: <span class="stat-number" id="filteredImages">0</span></span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-check-square"></i>
+                    <span>選択: <span class="stat-number" id="selectedImages">0</span></span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-hdd"></i>
+                    <span>総サイズ: <span class="stat-number" id="totalSize">0 MB</span></span>
+                </div>
+            </div>
+
+            <!-- フィルター＆アクション -->
+            <div class="filters">
+                <div class="filter-group">
+                    <label>形式:</label>
+                    <select id="formatFilter">
+                        <option value="">すべて</option>
+                        <option value="jpeg">JPEG</option>
+                        <option value="png">PNG</option>
+                        <option value="gif">GIF</option>
+                        <option value="webp">WebP</option>
+                        <option value="bmp">BMP</option>
+                        <option value="tiff">TIFF</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>ファイル名:</label>
+                    <input type="text" id="nameFilter" placeholder="検索...">
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 5px;">
+                    <button class="btn btn-primary" id="selectAllBtn">
+                        <i class="fas fa-check-double"></i> 全選択
+                    </button>
+                    <button class="btn btn-secondary" id="printBtn">
+                        <i class="fas fa-print"></i> 印刷
+                    </button>
+                    <button class="btn btn-secondary" id="renameBtn">
+                        <i class="fas fa-edit"></i> 名前変更
+                    </button>
+                    <button class="btn btn-danger" id="clearBtn">
+                        <i class="fas fa-trash"></i> クリア
+                    </button>
+                </div>
+                <div style="margin-top: 8px; font-size: 0.8rem; color: #6b7280; line-height: 1.3;">
+                    ※選択した全画像のサムネイル一覧、ファイル名の一括修正が可能です
+                </div>
+            </div>
+        </div>
+
+        <!-- プレビューコンテナ -->
+        <div class="preview-container">
+            <div class="preview-header">
+                <h2 class="preview-title">
+                    <i class="fas fa-th"></i>
+                    画像プレビュー一覧
+                </h2>
+                <div class="page-controls">
+                    <div class="page-info" id="pageInfo">
+                        ページ 1 / 1 (1-100 / 0件)
+                    </div>
+                    <button class="btn btn-page" id="prevPageBtn" disabled>
+                        <i class="fas fa-chevron-left"></i> 前
+                    </button>
+                    <button class="btn btn-page" id="nextPageBtn" disabled>
+                        次 <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- プレビューグリッド -->
+            <div class="preview-grid" id="previewGrid">
+                <div class="empty-state">
+                    <i class="fas fa-image"></i>
+                    <p>画像を選択してください</p>
+                    <p style="font-size: 0.9rem; margin-top: 10px;">
+                        複数選択可能・最大100枚まで一度に表示
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ファイル名変換モーダル -->
+    <div class="rename-modal" id="renameModal">
+        <div class="rename-modal-content">
+            <button class="modal-close" id="renameModalClose">
+                <i class="fas fa-times"></i>
+            </button>
+            
+            <h2 class="rename-title">
+                <i class="fas fa-edit"></i>
+                ファイル名一括変換
+            </h2>
+            
+            <div class="rename-stats" id="renameStats">
+                選択された画像: 0件
+            </div>
+            
+            <div class="rename-options">
+                <!-- 完全置換 -->
+                <div class="rename-option">
+                    <div class="option-header">
+                        <input type="checkbox" class="option-checkbox" id="replaceAllEnabled">
+                        <label for="replaceAllEnabled" class="option-label">元ファイル名を完全置換</label>
+                    </div>
+                    <div class="option-inputs">
+                        <input type="text" class="option-input option-single" id="replaceAllText" placeholder="新しいベース名（例：製品画像）" disabled>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #6b7280; margin-top: 5px;">
+                        ※ 元のファイル名を完全に新しい名前に変更します（連番は自動追加）
+                    </div>
+                </div>
+                
+                <!-- プレフィックス -->
+                <div class="rename-option">
+                    <div class="option-header">
+                        <input type="checkbox" class="option-checkbox" id="prefixEnabled">
+                        <label for="prefixEnabled" class="option-label">プレフィックス追加</label>
+                    </div>
+                    <div class="option-inputs">
+                        <input type="text" class="option-input option-single" id="prefixText" placeholder="IMG_" disabled>
+                    </div>
+                </div>
+                
+                <!-- 連番 -->
+                <div class="rename-option">
+                    <div class="option-header">
+                        <input type="checkbox" class="option-checkbox" id="numberEnabled">
+                        <label for="numberEnabled" class="option-label">連番追加</label>
+                    </div>
+                    <div class="option-inputs">
+                        <input type="number" class="option-input" id="numberStart" min="1" value="1" placeholder="開始番号" disabled>
+                        <input type="number" class="option-input" id="numberPadding" min="1" max="10" value="3" placeholder="桁数" disabled>
+                    </div>
+                </div>
+                
+                <!-- 日付 -->
+                <div class="rename-option">
+                    <div class="option-header">
+                        <input type="checkbox" class="option-checkbox" id="dateEnabled">
+                        <label for="dateEnabled" class="option-label">日付追加</label>
+                    </div>
+                    <div class="option-inputs">
+                        <input type="date" class="option-input" id="dateValue" disabled>
+                        <select class="option-input" id="dateFormat" disabled>
+                            <option value="YYYY-MM-DD">2025-01-15</option>
+                            <option value="YYYYMMDD">20250115</option>
+                            <option value="YYYY_MM_DD">2025_01_15</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- 文字置換 -->
+                <div class="rename-option">
+                    <div class="option-header">
+                        <input type="checkbox" class="option-checkbox" id="replaceEnabled">
+                        <label for="replaceEnabled" class="option-label">文字置換</label>
+                    </div>
+                    <div class="option-inputs">
+                        <input type="text" class="option-input" id="replaceFrom" placeholder="置換前" disabled>
+                        <input type="text" class="option-input" id="replaceTo" placeholder="置換後" disabled>
+                    </div>
+                </div>
+                
+                <!-- サフィックス -->
+                <div class="rename-option">
+                    <div class="option-header">
+                        <input type="checkbox" class="option-checkbox" id="suffixEnabled">
+                        <label for="suffixEnabled" class="option-label">サフィックス追加</label>
+                    </div>
+                    <div class="option-inputs">
+                        <input type="text" class="option-input option-single" id="suffixText" placeholder="_copy" disabled>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- プレビュー -->
+            <div class="preview-section">
+                <div class="preview-title">
+                    <i class="fas fa-eye"></i>
+                    変換プレビュー
+                </div>
+                <div class="preview-list" id="previewList">
+                    ファイルを選択して変換設定を行ってください
+                </div>
+            </div>
+            
+            <!-- アクション -->
+            <div class="rename-actions">
+                <button class="btn btn-secondary" id="renameCancel">
+                    <i class="fas fa-times"></i> キャンセル
+                </button>
+                <button class="btn btn-rename" id="renameIndividual">
+                    <i class="fas fa-download"></i> 個別ダウンロード
+                </button>
+                <button class="btn btn-zip" id="renameZip">
+                    <i class="fas fa-file-archive"></i> ZIP一括ダウンロード
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // グローバル変数
+        let allImages = [];
+        let filteredImages = [];
+        let selectedImages = new Set();
+        let currentPage = 1;
+        const imagesPerPage = 100;
+
+        // DOM要素
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.getElementById('uploadArea');
+        const previewGrid = document.getElementById('previewGrid');
+        const totalImagesEl = document.getElementById('totalImages');
+        const filteredImagesEl = document.getElementById('filteredImages');
+        const selectedImagesEl = document.getElementById('selectedImages');
+        const totalSizeEl = document.getElementById('totalSize');
+        const formatFilter = document.getElementById('formatFilter');
+        const nameFilter = document.getElementById('nameFilter');
+        const pageInfo = document.getElementById('pageInfo');
+        const prevPageBtn = document.getElementById('prevPageBtn');
+        const nextPageBtn = document.getElementById('nextPageBtn');
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        const printBtn = document.getElementById('printBtn');
+        const renameBtn = document.getElementById('renameBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        
+        // リネーム関連
+        const renameModal = document.getElementById('renameModal');
+        const renameModalClose = document.getElementById('renameModalClose');
+        const renameStats = document.getElementById('renameStats');
+        const previewList = document.getElementById('previewList');
+        const renameCancel = document.getElementById('renameCancel');
+        const renameIndividual = document.getElementById('renameIndividual');
+        const renameZip = document.getElementById('renameZip');
+
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            setupEventListeners();
+        });
+
+        // イベントリスナー設定
+        function setupEventListeners() {
+            // ファイル選択
+            fileInput.addEventListener('change', handleFileSelect);
+            uploadArea.addEventListener('click', () => fileInput.click());
+
+            // ドラッグ&ドロップ
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, unhighlight, false);
+            });
+
+            uploadArea.addEventListener('drop', handleDrop, false);
+
+            // フィルター
+            formatFilter.addEventListener('change', applyFilters);
+            nameFilter.addEventListener('input', debounce(applyFilters, 300));
+
+            // ページネーション
+            prevPageBtn.addEventListener('click', () => changePage(-1));
+            nextPageBtn.addEventListener('click', () => changePage(1));
+
+            // アクションボタン
+            selectAllBtn.addEventListener('click', toggleSelectAll);
+            printBtn.addEventListener('click', printImages);
+            renameBtn.addEventListener('click', showRenameModal);
+            clearBtn.addEventListener('click', clearAll);
+            
+            // リネームモーダル
+            renameModalClose.addEventListener('click', hideRenameModal);
+            renameCancel.addEventListener('click', hideRenameModal);
+            renameIndividual.addEventListener('click', downloadIndividual);
+            renameZip.addEventListener('click', downloadZip);
+            
+            // リネームオプションの変更イベント
+            setupRenameOptions();
+        }
+
+        // ファイル処理
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlight(e) {
+            uploadArea.classList.add('drag-over');
+        }
+
+        function unhighlight(e) {
+            uploadArea.classList.remove('drag-over');
+        }
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles([...files]);
+        }
+
+        function handleFileSelect(e) {
+            handleFiles([...e.target.files]);
+        }
+
+        // ファイル処理メイン
+        async function handleFiles(files) {
+            // 画像ファイル + TIFFファイルをフィルタ
+            const imageFiles = files.filter(file => 
+                file.type.startsWith('image/') || 
+                file.name.toLowerCase().endsWith('.tiff') ||
+                file.name.toLowerCase().endsWith('.tif')
+            );
+            
+            if (imageFiles.length === 0) {
+                alert('画像ファイルを選択してください\n対応形式: JPEG, PNG, GIF, WebP, BMP, TIFF');
+                return;
+            }
+
+            // ローディング表示
+            showLoading();
+
+            // 画像情報を生成
+            const imagePromises = imageFiles.map(async (file, index) => {
+                try {
+                    const imageData = await processImageFile(file, index);
+                    return imageData;
+                } catch (error) {
+                    console.error('画像処理エラー:', error);
+                    return null;
+                }
+            });
+
+            const newImages = (await Promise.all(imagePromises)).filter(Boolean);
+            
+            // 既存画像に追加
+            allImages.push(...newImages);
+            applyFilters();
+            updateStats();
+
+            // ローディング非表示
+            hideLoading();
+        }
+
+        // 画像ファイル処理
+        function processImageFile(file, index) {
+            return new Promise((resolve) => {
+                // TIFF判定
+                const isTiff = file.name.toLowerCase().endsWith('.tiff') || 
+                              file.name.toLowerCase().endsWith('.tif') ||
+                              file.type === 'image/tiff';
+
+                if (isTiff) {
+                    // TIFF処理
+                    processTiffFile(file, index, resolve);
+                } else {
+                    // 通常の画像処理
+                    processStandardImageFile(file, index, resolve);
+                }
+            });
+        }
+
+        // 通常画像ファイル処理
+        function processStandardImageFile(file, index, resolve) {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const img = new Image();
+                
+                img.onload = function() {
+                    // サムネイル生成
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    // サムネイルサイズ計算
+                    const maxSize = 160;
+                    const ratio = Math.min(maxSize / img.width, maxSize / img.height);
+                    canvas.width = img.width * ratio;
+                    canvas.height = img.height * ratio;
+                    
+                    // 描画
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    const imageData = {
+                        id: Date.now() + index,
+                        file: file,
+                        name: file.name,
+                        size: file.size,
+                        type: file.type,
+                        width: img.width,
+                        height: img.height,
+                        thumbnail: canvas.toDataURL('image/jpeg', 0.7),
+                        format: getImageFormat(file.type, file.name)
+                    };
+                    
+                    resolve(imageData);
+                };
+                
+                img.onerror = () => resolve(null);
+                img.src = e.target.result;
+            };
+            
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(file);
+        }
+
+        // TIFF画像ファイル処理（UTIF.js使用）
+        async function processTiffFile(file, index, resolve) {
+            try {
+                // TIFFライブラリの読み込み確認
+                await loadTiffLibrary();
+                
+                if (typeof UTIF === 'undefined') {
+                    console.error('UTIF ライブラリが利用できません');
+                    createTiffPlaceholder(file, index, resolve);
+                    return;
+                }
+
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    try {
+                        const buffer = e.target.result;
+                        
+                        // UTIFでTIFFを解析
+                        const ifds = UTIF.decode(buffer);
+                        
+                        if (ifds.length === 0) {
+                            console.error('TIFF画像の解析に失敗:', file.name);
+                            createTiffPlaceholder(file, index, resolve);
+                            return;
+                        }
+
+                        // 最初のページ（フレーム）を取得
+                        const page = ifds[0];
+                        UTIF.decodeImage(buffer, page);
+                        
+                        // RGBA配列を取得
+                        const rgba = UTIF.toRGBA8(page);
+                        
+                        // Canvasに描画
+                        const canvas = document.createElement('canvas');
+                        canvas.width = page.width;
+                        canvas.height = page.height;
+                        const ctx = canvas.getContext('2d');
+                        
+                        // ImageDataを作成
+                        const imageData = ctx.createImageData(page.width, page.height);
+                        imageData.data.set(rgba);
+                        ctx.putImageData(imageData, 0, 0);
+                        
+                        // サムネイル生成
+                        const thumbnailCanvas = document.createElement('canvas');
+                        const thumbnailCtx = thumbnailCanvas.getContext('2d');
+                        
+                        const maxSize = 160;
+                        const ratio = Math.min(maxSize / canvas.width, maxSize / canvas.height);
+                        thumbnailCanvas.width = canvas.width * ratio;
+                        thumbnailCanvas.height = canvas.height * ratio;
+                        
+                        thumbnailCtx.drawImage(canvas, 0, 0, thumbnailCanvas.width, thumbnailCanvas.height);
+                        
+                        const imageDataObj = {
+                            id: Date.now() + index,
+                            file: file,
+                            name: file.name,
+                            size: file.size,
+                            type: 'image/tiff',
+                            width: page.width,
+                            height: page.height,
+                            thumbnail: thumbnailCanvas.toDataURL('image/jpeg', 0.7),
+                            format: 'TIFF'
+                        };
+                        
+                        resolve(imageDataObj);
+                        
+                    } catch (error) {
+                        console.error('TIFF画像処理エラー:', error, file.name);
+                        createTiffPlaceholder(file, index, resolve);
+                    }
+                };
+                
+                reader.onerror = function() {
+                    console.error('TIFF ファイル読み込みエラー:', file.name);
+                    createTiffPlaceholder(file, index, resolve);
+                };
+                
+                reader.readAsArrayBuffer(file);
+                
+            } catch (error) {
+                console.error('TIFF処理の初期化エラー:', error);
+                createTiffPlaceholder(file, index, resolve);
+            }
+        }
+
+        // TIFFプレースホルダー作成（エラー時の代替）
+        function createTiffPlaceholder(file, index, resolve) {
+            // TIFFアイコン付きプレースホルダー画像を生成
+            const canvas = document.createElement('canvas');
+            canvas.width = 160;
+            canvas.height = 120;
+            const ctx = canvas.getContext('2d');
+            
+            // 背景
+            ctx.fillStyle = '#f3f4f6';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // ボーダー
+            ctx.strokeStyle = '#d1d5db';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+            
+            // TIFFアイコン
+            ctx.fillStyle = '#6b7280';
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('TIFF', canvas.width / 2, canvas.height / 2 - 10);
+            
+            ctx.font = '12px Arial';
+            ctx.fillText('プレビュー不可', canvas.width / 2, canvas.height / 2 + 10);
+            
+            const imageData = {
+                id: Date.now() + index,
+                file: file,
+                name: file.name,
+                size: file.size,
+                type: 'image/tiff',
+                width: 0, // 不明
+                height: 0, // 不明
+                thumbnail: canvas.toDataURL('image/png'),
+                format: 'TIFF',
+                isPlaceholder: true
+            };
+            
+            resolve(imageData);
+        }
+
+        // 画像形式取得
+        function getImageFormat(mimeType, fileName = '') {
+            // ファイル名から判定（TIFF対応）
+            if (fileName) {
+                const ext = fileName.toLowerCase().split('.').pop();
+                if (ext === 'tiff' || ext === 'tif') {
+                    return 'TIFF';
+                }
+            }
+            
+            // MIMEタイプから判定
+            const formatMap = {
+                'image/jpeg': 'JPEG',
+                'image/jpg': 'JPEG',
+                'image/png': 'PNG',
+                'image/gif': 'GIF',
+                'image/webp': 'WebP',
+                'image/bmp': 'BMP',
+                'image/tiff': 'TIFF',
+                'image/tif': 'TIFF',
+                'image/svg+xml': 'SVG'
+            };
+            return formatMap[mimeType] || 'Unknown';
+        }
+
+        // フィルター適用
+        function applyFilters() {
+            const formatValue = formatFilter.value.toLowerCase();
+            const nameValue = nameFilter.value.toLowerCase();
+
+            filteredImages = allImages.filter(image => {
+                const matchesFormat = !formatValue || image.format.toLowerCase().includes(formatValue);
+                const matchesName = !nameValue || image.name.toLowerCase().includes(nameValue);
+                return matchesFormat && matchesName;
+            });
+
+            currentPage = 1;
+            updateDisplay();
+        }
+
+        // 表示更新
+        function updateDisplay() {
+            updateGrid();
+            updatePagination();
+            updateStats();
+        }
+
+        // グリッド更新
+        function updateGrid() {
+            if (filteredImages.length === 0) {
+                previewGrid.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-image"></i>
+                        <p>画像がありません</p>
+                        <p style="font-size: 0.9rem; margin-top: 10px;">
+                            フィルターを調整するか、画像を追加してください
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+
+            // ページネーション適用
+            const startIndex = (currentPage - 1) * imagesPerPage;
+            const endIndex = startIndex + imagesPerPage;
+            const pageImages = filteredImages.slice(startIndex, endIndex);
+
+            // グリッド生成（100枚対応）
+            previewGrid.innerHTML = pageImages.map(image => `
+                <div class="image-item" data-id="${image.id}" onclick="toggleImageSelection(${image.id})">
+                    <div class="selection-overlay">
+                        <i class="fas fa-check"></i>
+                    </div>
+                    <div class="image-preview">
+                        <img src="${image.thumbnail}" alt="${image.name}" loading="lazy">
+                    </div>
+                    <div class="image-info">
+                        <div class="image-name" title="${image.name}">${image.name}</div>
+                        <div class="image-meta">
+                            <div class="file-size">${formatFileSize(image.size)}</div>
+                            <div>${image.format}${image.isPlaceholder ? ' (プレビュー不可)' : ''}</div>
+                            <div class="image-dimensions">${image.width > 0 ? image.width + '×' + image.height : 'サイズ不明'}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // 選択状態を反映
+            selectedImages.forEach(id => {
+                const item = document.querySelector(`[data-id="${id}"]`);
+                if (item) {
+                    item.classList.add('selected');
+                }
+            });
+        }
+
+        // ページネーション更新
+        function updatePagination() {
+            const totalPages = Math.ceil(filteredImages.length / imagesPerPage);
+            const startItem = filteredImages.length === 0 ? 0 : (currentPage - 1) * imagesPerPage + 1;
+            const endItem = Math.min(currentPage * imagesPerPage, filteredImages.length);
+
+            const pageInfo = document.getElementById('pageInfo');
+            pageInfo.textContent = `ページ ${currentPage} / ${totalPages} (${startItem}-${endItem} / ${filteredImages.length}件)`;
+            
+            prevPageBtn.disabled = currentPage <= 1;
+            nextPageBtn.disabled = currentPage >= totalPages;
+        }
+
+        // ページ変更
+        function changePage(direction) {
+            const totalPages = Math.ceil(filteredImages.length / imagesPerPage);
+            const newPage = currentPage + direction;
+            
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                updateDisplay();
+            }
+        }
+
+        // 統計更新
+        function updateStats() {
+            totalImagesEl.textContent = allImages.length;
+            filteredImagesEl.textContent = filteredImages.length;
+            selectedImagesEl.textContent = selectedImages.size;
+            
+            const totalBytes = allImages.reduce((sum, img) => sum + img.size, 0);
+            totalSizeEl.textContent = formatFileSize(totalBytes);
+        }
+
+        // 画像選択切り替え
+        function toggleImageSelection(imageId) {
+            if (selectedImages.has(imageId)) {
+                selectedImages.delete(imageId);
+            } else {
+                selectedImages.add(imageId);
+            }
+            
+            // UI更新
+            const item = document.querySelector(`[data-id="${imageId}"]`);
+            if (item) {
+                item.classList.toggle('selected', selectedImages.has(imageId));
+            }
+            
+            updateStats();
+        }
+
+        // 全選択切り替え
+        function toggleSelectAll() {
+            const currentPageImages = filteredImages.slice(
+                (currentPage - 1) * imagesPerPage,
+                currentPage * imagesPerPage
+            );
+            
+            const allCurrentSelected = currentPageImages.every(img => selectedImages.has(img.id));
+            
+            if (allCurrentSelected) {
+                // 現在ページを全て選択解除
+                currentPageImages.forEach(img => selectedImages.delete(img.id));
+            } else {
+                // 現在ページを全て選択
+                currentPageImages.forEach(img => selectedImages.add(img.id));
+            }
+            
+            updateDisplay();
+        }
+
+        // 印刷機能
+        function printImages() {
+            if (selectedImages.size === 0) {
+                alert('印刷する画像を選択してください');
+                return;
+            }
+
+            // 選択された画像を取得
+            const selectedImageData = allImages.filter(img => selectedImages.has(img.id));
+            
+            // 印刷用の新しいウィンドウを開く
+            const printWindow = window.open('', '_blank');
+            
+            // 印刷用HTML生成
+            const printHTML = generatePrintHTML(selectedImageData);
+            
+            printWindow.document.write(printHTML);
+            printWindow.document.close();
+            
+            // 画像読み込み完了後に印刷
+            printWindow.onload = function() {
+                setTimeout(() => {
+                    printWindow.print();
+                    printWindow.close();
+                }, 500);
+            };
+        }
+
+        // 印刷用HTML生成
+        function generatePrintHTML(images) {
+            const imagesPerRow = 5;
+            const imagesPerPage = 25; // 5×5
+            
+            let html = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>画像一覧印刷</title>
+                    <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                        body { font-family: 'Noto Sans JP', Arial, sans-serif; }
+                        .page { 
+                            width: 210mm; 
+                            min-height: 297mm; 
+                            padding: 10mm; 
+                            page-break-after: always; 
+                            display: flex;
+                            flex-direction: column;
+                        }
+                        .page:last-child { page-break-after: avoid; }
+                        .page-header {
+                            text-align: center;
+                            margin-bottom: 15px;
+                            padding-bottom: 10px;
+                            border-bottom: 2px solid #333;
+                        }
+                        .page-title { 
+                            font-size: 16px; 
+                            font-weight: bold; 
+                            margin-bottom: 5px; 
+                        }
+                        .page-info { 
+                            font-size: 12px; 
+                            color: #666; 
+                        }
+                        .grid {
+                            display: grid;
+                            grid-template-columns: repeat(${imagesPerRow}, 1fr);
+                            gap: 8px;
+                            flex: 1;
+                        }
+                        .item {
+                            border: 1px solid #ccc;
+                            padding: 6px;
+                            text-align: center;
+                            background: white;
+                            display: flex;
+                            flex-direction: column;
+                            height: 180px;
+                        }
+                        .item img {
+                            width: 100%;
+                            height: 120px;
+                            object-fit: cover;
+                            border: 1px solid #ddd;
+                            margin-bottom: 4px;
+                        }
+                        .item-info {
+                            flex: 1;
+                            display: flex;
+                            flex-direction: column;
+                            justify-content: space-between;
+                            font-size: 8px;
+                            line-height: 1.2;
+                        }
+                        .item-name {
+                            font-weight: bold;
+                            margin-bottom: 2px;
+                            word-break: break-all;
+                            overflow: hidden;
+                            display: -webkit-box;
+                            -webkit-line-clamp: 2;
+                            -webkit-box-orient: vertical;
+                        }
+                        .item-meta {
+                            color: #666;
+                        }
+                        @media print {
+                            .page { margin: 0; }
+                            @page { size: A4; margin: 0; }
+                        }
+                    </style>
+                </head>
+                <body>
+            `;
+
+            // ページごとに分割
+            for (let pageIndex = 0; pageIndex < Math.ceil(images.length / imagesPerPage); pageIndex++) {
+                const pageStart = pageIndex * imagesPerPage;
+                const pageEnd = Math.min(pageStart + imagesPerPage, images.length);
+                const pageImages = images.slice(pageStart, pageEnd);
+                
+                html += `
+                    <div class="page">
+                        <div class="page-header">
+                            <div class="page-title">画像一覧 - ページ ${pageIndex + 1}</div>
+                            <div class="page-info">
+                                印刷日時: ${new Date().toLocaleString('ja-JP')} | 
+                                ${pageStart + 1}-${pageEnd} / ${images.length}件
+                            </div>
+                        </div>
+                        <div class="grid">
+                `;
+                
+                pageImages.forEach(image => {
+                    html += `
+                        <div class="item">
+                            <img src="${image.thumbnail}" alt="${image.name}">
+                            <div class="item-info">
+                                <div class="item-name">${escapeHtml(image.name)}</div>
+                                <div class="item-meta">
+                                    <div>${image.format} | ${formatFileSize(image.size)}</div>
+                                    <div>${image.width}×${image.height}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                // 残りの空セルを埋める
+                const remainingCells = imagesPerPage - pageImages.length;
+                for (let i = 0; i < remainingCells; i++) {
+                    html += '<div class="item" style="border: none;"></div>';
+                }
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += `
+                </body>
+                </html>
+            `;
+            
+            return html;
+        }
+
+        // 全クリア
+        function clearAll() {
+            if (allImages.length === 0) return;
+            
+            if (confirm('すべての画像をクリアしますか？')) {
+                allImages = [];
+                filteredImages = [];
+                selectedImages.clear();
+                currentPage = 1;
+                fileInput.value = '';
+                updateDisplay();
+            }
+        }
+
+        // ローディング表示
+        function showLoading() {
+            previewGrid.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>画像を処理しています...</p>
+                    <p style="font-size: 0.8rem; color: #6b7280; margin-top: 5px;">
+                        TIFF画像は変換に時間がかかる場合があります
+                    </p>
+                </div>
+            `;
+        }
+
+        // ローディング非表示
+        function hideLoading() {
+            updateDisplay();
+        }
+
+        // ユーティリティ関数
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // キーボードショートカット
+        document.addEventListener('keydown', function(e) {
+            // Ctrl+A で全選択
+            if (e.ctrlKey && e.key === 'a' && filteredImages.length > 0) {
+                e.preventDefault();
+                toggleSelectAll();
+            }
+            
+            // Ctrl+P で印刷
+            if (e.ctrlKey && e.key === 'p' && selectedImages.size > 0) {
+                e.preventDefault();
+                printImages();
+            }
+            
+            // Ctrl+R でリネーム
+            if (e.ctrlKey && e.key === 'r' && selectedImages.size > 0) {
+                e.preventDefault();
+                showRenameModal();
+            }
+            
+            // Delete で選択画像削除
+            if (e.key === 'Delete' && selectedImages.size > 0) {
+                if (confirm('選択した画像を削除しますか？')) {
+                    allImages = allImages.filter(img => !selectedImages.has(img.id));
+                    selectedImages.clear();
+                    applyFilters();
+                }
+            }
+            
+            // Escape でモーダルを閉じる
+            if (e.key === 'Escape') {
+                if (renameModal.classList.contains('show')) {
+                    hideRenameModal();
+                }
+            }
+        });
+
+        // ウィンドウサイズ変更時の対応
+        window.addEventListener('resize', debounce(() => {
+            // 必要に応じてレイアウト調整
+        }, 250));
+
+        // デバッグ用（開発時のみ）
+        window.debug = {
+            images: () => allImages,
+            filtered: () => filteredImages,
+            selected: () => [...selectedImages],
+            addTestImages: addTestImages,
+            testTiffSupport: testTiffSupport,
+            generateRename: generateNewFileName
+        };
+
+        // TIFF対応テスト
+        function testTiffSupport() {
+            console.log('=== TIFF対応テスト ===');
+            console.log('UTIF library loaded:', typeof UTIF !== 'undefined');
+            console.log('Library loading status:', { loaded: tiffLibraryLoaded, loading: tiffLibraryLoading });
+            
+            if (typeof UTIF !== 'undefined') {
+                console.log('UTIF object:', UTIF);
+                console.log('TIFF機能は正常に読み込まれています（UTIF.js使用）');
+            } else {
+                console.log('TIFFライブラリが読み込まれていません');
+                console.log('手動で読み込みを試行します...');
+                
+                loadTiffLibrary().then(() => {
+                    console.log('手動読み込み完了');
+                    console.log('UTIF library loaded:', typeof UTIF !== 'undefined');
+                }).catch(error => {
+                    console.error('手動読み込み失敗:', error);
+                });
+            }
+        }
+
+        // ========== ファイル名変換機能 ==========
+
+        // リネームモーダル表示
+        function showRenameModal() {
+            if (selectedImages.size === 0) {
+                alert('ファイル名を変更する画像を選択してください');
+                return;
+            }
+            
+            // 今日の日付をデフォルトに設定
+            document.getElementById('dateValue').value = new Date().toISOString().split('T')[0];
+            
+            updateRenameStats();
+            updateRenamePreview();
+            renameModal.classList.add('show');
+        }
+
+        // リネームモーダル非表示
+        function hideRenameModal() {
+            renameModal.classList.remove('show');
+        }
+
+        // リネームオプション設定
+        function setupRenameOptions() {
+            const options = [
+                { checkbox: 'replaceAllEnabled', inputs: ['replaceAllText'] },
+                { checkbox: 'prefixEnabled', inputs: ['prefixText'] },
+                { checkbox: 'numberEnabled', inputs: ['numberStart', 'numberPadding'] },
+                { checkbox: 'dateEnabled', inputs: ['dateValue', 'dateFormat'] },
+                { checkbox: 'replaceEnabled', inputs: ['replaceFrom', 'replaceTo'] },
+                { checkbox: 'suffixEnabled', inputs: ['suffixText'] }
+            ];
+
+            options.forEach(option => {
+                const checkbox = document.getElementById(option.checkbox);
+                const inputs = option.inputs.map(id => document.getElementById(id));
+
+                // チェックボックス変更時
+                checkbox.addEventListener('change', function() {
+                    inputs.forEach(input => {
+                        input.disabled = !this.checked;
+                    });
+                    
+                    // 完全置換が選択された場合は他のオプションと排他制御
+                    if (option.checkbox === 'replaceAllEnabled' && this.checked) {
+                        // 完全置換が有効な場合、連番は強制的に有効化
+                        document.getElementById('numberEnabled').checked = true;
+                        document.getElementById('numberStart').disabled = false;
+                        document.getElementById('numberPadding').disabled = false;
+                        
+                        // 注意メッセージ表示
+                        showReplaceAllWarning(true);
+                    } else if (option.checkbox === 'replaceAllEnabled' && !this.checked) {
+                        // 完全置換が無効な場合、警告メッセージを非表示
+                        showReplaceAllWarning(false);
+                    }
+                    
+                    updateRenamePreview();
+                });
+
+                // 入力値変更時
+                inputs.forEach(input => {
+                    input.addEventListener('input', updateRenamePreview);
+                    input.addEventListener('change', updateRenamePreview);
+                });
+            });
+        }
+
+        // 完全置換の警告メッセージ表示/非表示
+        function showReplaceAllWarning(show) {
+            let warningEl = document.getElementById('replaceAllWarning');
+            
+            if (show && !warningEl) {
+                // 警告メッセージを作成
+                warningEl = document.createElement('div');
+                warningEl.id = 'replaceAllWarning';
+                warningEl.style.cssText = `
+                    background: #fef3cd;
+                    border: 1px solid #facc15;
+                    border-radius: 6px;
+                    padding: 10px;
+                    margin: 10px 0;
+                    font-size: 0.85rem;
+                    color: #92400e;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                `;
+                warningEl.innerHTML = `
+                    <i class="fas fa-exclamation-triangle" style="color: #f59e0b;"></i>
+                    完全置換モード：元のファイル名は完全に新しい名前に変更されます。連番は自動で追加されます。
+                `;
+                
+                // 完全置換オプションの後に挿入
+                const replaceAllOption = document.getElementById('replaceAllEnabled').closest('.rename-option');
+                replaceAllOption.after(warningEl);
+            } else if (!show && warningEl) {
+                // 警告メッセージを削除
+                warningEl.remove();
+            }
+        }
+
+        // リネーム統計更新
+        function updateRenameStats() {
+            renameStats.textContent = `選択された画像: ${selectedImages.size}件`;
+        }
+
+        // リネームプレビュー更新
+        function updateRenamePreview() {
+            const selectedImageData = allImages.filter(img => selectedImages.has(img.id));
+            
+            if (selectedImageData.length === 0) {
+                previewList.innerHTML = 'ファイルを選択して変換設定を行ってください';
+                return;
+            }
+
+            const previewItems = selectedImageData.slice(0, 10).map((image, index) => {
+                const newName = generateNewFileName(image.name, index);
+                return `
+                    <div class="preview-item">
+                        <span class="preview-original">${image.name}</span>
+                        <span class="preview-new">${newName}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const remaining = selectedImageData.length - 10;
+            const remainingText = remaining > 0 ? `<div class="preview-item" style="font-style: italic; color: #6b7280;">...他 ${remaining}件</div>` : '';
+
+            previewList.innerHTML = previewItems + remainingText;
+        }
+
+        // 新しいファイル名生成
+        function generateNewFileName(originalName, index) {
+            const ext = originalName.split('.').pop();
+            let newName;
+            
+            // 完全置換モードの場合
+            if (document.getElementById('replaceAllEnabled').checked) {
+                const baseName = document.getElementById('replaceAllText').value.trim();
+                
+                if (!baseName) {
+                    newName = 'renamed_file';
+                } else {
+                    newName = baseName;
+                }
+                
+                // 完全置換の場合は連番を必須で追加
+                const startNum = parseInt(document.getElementById('numberStart').value) || 1;
+                const padding = parseInt(document.getElementById('numberPadding').value) || 3;
+                const number = (startNum + index).toString().padStart(padding, '0');
+                newName = newName + '_' + number;
+                
+                // 日付が有効な場合は追加
+                if (document.getElementById('dateEnabled').checked) {
+                    const dateValue = document.getElementById('dateValue').value;
+                    const dateFormat = document.getElementById('dateFormat').value;
+                    
+                    if (dateValue) {
+                        const date = new Date(dateValue);
+                        let formattedDate = '';
+                        
+                        switch (dateFormat) {
+                            case 'YYYY-MM-DD':
+                                formattedDate = date.toISOString().split('T')[0];
+                                break;
+                            case 'YYYYMMDD':
+                                formattedDate = date.toISOString().split('T')[0].replace(/-/g, '');
+                                break;
+                            case 'YYYY_MM_DD':
+                                formattedDate = date.toISOString().split('T')[0].replace(/-/g, '_');
+                                break;
+                        }
+                        
+                        newName = newName + '_' + formattedDate;
+                    }
+                }
+                
+                return newName + '.' + ext;
+            }
+            
+            // 従来の方式（元ファイル名ベース）
+            const nameWithoutExt = originalName.substring(0, originalName.lastIndexOf('.'));
+            newName = nameWithoutExt;
+
+            // プレフィックス
+            if (document.getElementById('prefixEnabled').checked) {
+                const prefix = document.getElementById('prefixText').value;
+                newName = prefix + newName;
+            }
+
+            // 連番
+            if (document.getElementById('numberEnabled').checked) {
+                const startNum = parseInt(document.getElementById('numberStart').value) || 1;
+                const padding = parseInt(document.getElementById('numberPadding').value) || 3;
+                const number = (startNum + index).toString().padStart(padding, '0');
+                newName = newName + '_' + number;
+            }
+
+            // 日付
+            if (document.getElementById('dateEnabled').checked) {
+                const dateValue = document.getElementById('dateValue').value;
+                const dateFormat = document.getElementById('dateFormat').value;
+                
+                if (dateValue) {
+                    const date = new Date(dateValue);
+                    let formattedDate = '';
+                    
+                    switch (dateFormat) {
+                        case 'YYYY-MM-DD':
+                            formattedDate = date.toISOString().split('T')[0];
+                            break;
+                        case 'YYYYMMDD':
+                            formattedDate = date.toISOString().split('T')[0].replace(/-/g, '');
+                            break;
+                        case 'YYYY_MM_DD':
+                            formattedDate = date.toISOString().split('T')[0].replace(/-/g, '_');
+                            break;
+                    }
+                    
+                    newName = newName + '_' + formattedDate;
+                }
+            }
+
+            // 文字置換
+            if (document.getElementById('replaceEnabled').checked) {
+                const from = document.getElementById('replaceFrom').value;
+                const to = document.getElementById('replaceTo').value;
+                
+                if (from) {
+                    newName = newName.replace(new RegExp(from, 'g'), to);
+                }
+            }
+
+            // サフィックス
+            if (document.getElementById('suffixEnabled').checked) {
+                const suffix = document.getElementById('suffixText').value;
+                newName = newName + suffix;
+            }
+
+            return newName + '.' + ext;
+        }
+
+        // 個別ダウンロード
+        function downloadIndividual() {
+            const selectedImageData = allImages.filter(img => selectedImages.has(img.id));
+            
+            if (selectedImageData.length === 0) {
+                alert('ダウンロードする画像を選択してください');
+                return;
+            }
+
+            selectedImageData.forEach((image, index) => {
+                setTimeout(() => {
+                    const newFileName = generateNewFileName(image.name, index);
+                    const link = document.createElement('a');
+                    link.download = newFileName;
+                    link.href = URL.createObjectURL(image.file);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }, index * 500); // 500ms間隔でダウンロード
+            });
+
+            hideRenameModal();
+            alert(`${selectedImageData.length}件のファイルのダウンロードを開始しました`);
+        }
+
+        // ZIP一括ダウンロード
+        async function downloadZip() {
+            if (typeof JSZip === 'undefined') {
+                alert('ZIP機能を利用するためのライブラリが読み込まれていません');
+                return;
+            }
+
+            const selectedImageData = allImages.filter(img => selectedImages.has(img.id));
+            
+            if (selectedImageData.length === 0) {
+                alert('ダウンロードする画像を選択してください');
+                return;
+            }
+
+            try {
+                // ZIP作成開始
+                const zip = new JSZip();
+                const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
+                
+                // プログレス表示用
+                previewList.innerHTML = '<div style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> ZIP作成中...</div>';
+
+                // ファイルをZIPに追加
+                for (let index = 0; index < selectedImageData.length; index++) {
+                    const image = selectedImageData[index];
+                    const newFileName = generateNewFileName(image.name, index);
+                    zip.file(newFileName, image.file);
+                }
+
+                // ZIP生成
+                const content = await zip.generateAsync({ 
+                    type: 'blob',
+                    compression: 'STORE' // 画像は既に圧縮されているのでそのまま
+                });
+
+                // ダウンロード
+                const link = document.createElement('a');
+                link.download = `renamed_images_${timestamp}.zip`;
+                link.href = URL.createObjectURL(content);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                hideRenameModal();
+                alert(`${selectedImageData.length}件の画像を含むZIPファイルをダウンロードしました`);
+
+            } catch (error) {
+                console.error('ZIP作成エラー:', error);
+                alert('ZIP作成中にエラーが発生しました');
+                updateRenamePreview(); // プレビューを元に戻す
+            }
+        }
+
+        // テスト用画像追加（開発用）
+        function addTestImages() {
+            // カラーボックス画像を生成してテスト
+            const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
+            const testImages = [];
+            
+            for (let i = 0; i < 20; i++) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 200 + Math.random() * 300;
+                canvas.height = 150 + Math.random() * 200;
+                const ctx = canvas.getContext('2d');
+                
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = 'white';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Test ${i + 1}`, canvas.width / 2, canvas.height / 2);
+                
+                const imageData = {
+                    id: Date.now() + i,
+                    file: { name: `test-image-${i + 1}.png`, size: 50000 + Math.random() * 100000, type: 'image/png' },
+                    name: `test-image-${i + 1}.png`,
+                    size: 50000 + Math.random() * 100000,
+                    type: 'image/png',
+                    width: canvas.width,
+                    height: canvas.height,
+                    thumbnail: canvas.toDataURL(),
+                    format: 'PNG'
+                };
+                
+                testImages.push(imageData);
+            }
+            
+            allImages.push(...testImages);
+            applyFilters();
+            updateStats();
+        }
+    </script>
+</body>
+</html>
